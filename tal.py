@@ -1,321 +1,111 @@
-import random
+import pygame
+import sys
 
-# ==========================================================
-# UTILITY
-# ==========================================================
+from engine.config import *
+from engine.board import Board
+from engine.hexgrid import get_hex_positions
+from engine.aircraft import load_aircraft_images
+from engine.game_state import GameState
 
-def roll_d10():
-    return random.randint(1, 10)
+pygame.init()
+screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+pygame.display.set_caption("TAL Engine - Tactical Terminal")
 
-# ==========================================================
-# HEX MAP + RIDGE SYSTEM
-# ==========================================================
+clock = pygame.time.Clock()
+terminal_font = pygame.font.SysFont("consolas", 14)
 
-HEX_CONNECTIONS = {
-    1: [2,3,4],
-    2: [1,4,5],
-    3: [1,4,6],
-    4: [1,2,3,5,6,7],
-    5: [2,4,7],
-    6: [3,4,7],
-    7: [4,5,6]
-}
+board = Board()
+aircraft_images = load_aircraft_images()
+game_state = GameState(aircraft_images)
 
-RIDGES = {
-    frozenset((3,4)),
-    frozenset((4,5)),
-}
+show_base_screen = False
+quit_button_rect = pygame.Rect(WINDOW_WIDTH - 160, 20, 140, 50)
 
-def is_adjacent(h1, h2):
-    return h2 in HEX_CONNECTIONS[h1]
+log_lines = []
 
-def ridge_blocks(h1, h2):
-    return frozenset((h1, h2)) in RIDGES
+def add_log(text):
+    log_lines.append(text)
+    if len(log_lines) > 14:
+        log_lines.pop(0)
 
-def has_line_of_sight(h1, h2):
-    if h1 == h2:
-        return True
-    if is_adjacent(h1, h2):
-        if ridge_blocks(h1, h2):
-            return False
-        return True
-    return False
+running = True
 
-# ==========================================================
-# CLASSES
-# ==========================================================
+while running:
 
-class Pilot:
-    def __init__(self, name, strike, cannon, cool):
-        self.name = name
-        self.strike = strike
-        self.cannon = cannon
-        self.cool = cool
-        self.stress = 0
+    clock.tick(FPS)
 
-    def add_stress(self, amount):
-        self.stress += amount
-        print(f">>> {self.name} gains {amount} STRESS (Total: {self.stress})")
+    for event in pygame.event.get():
 
+        if event.type == pygame.QUIT:
+            running = False
 
-class Aircraft:
-    def __init__(self, name, speed, structure_limit):
-        self.name = name
-        self.speed = speed
-        self.structure = 0
-        self.structure_limit = structure_limit
-        self.altitude = "HIGH"
-        self.hex = 4
+        if event.type == pygame.KEYDOWN:
 
-    def move(self, new_hex):
-        if new_hex in HEX_CONNECTIONS[self.hex]:
-            self.hex = new_hex
-            print(f">>> {self.name} moved to hex {self.hex}")
-        else:
-            print("Invalid move.")
+            if event.key == pygame.K_TAB:
+                show_base_screen = not show_base_screen
 
-    def change_altitude(self):
-        self.altitude = "LOW" if self.altitude == "HIGH" else "HIGH"
-        print(f">>> Altitude now {self.altitude}")
+            if event.key == pygame.K_ESCAPE:
+                running = False
 
-    def take_structure_hit(self):
-        self.structure += 1
-        print(f">>> {self.name} takes STRUCTURE ({self.structure}/{self.structure_limit})")
+            if event.key == pygame.K_a:
+                game_state.attack(add_log)
 
-    def destroyed(self):
-        return self.structure >= self.structure_limit
+            if event.key == pygame.K_e:
+                game_state.end_turn(add_log)
 
+        if event.type == pygame.MOUSEBUTTONDOWN:
 
-class EnemyUnit:
-    def __init__(self, name, icon, hp, strike_def, cannon_def, attack_value, hex_position):
-        self.name = name
-        self.icon = icon
-        self.hp = hp
-        self.strike_def = strike_def
-        self.cannon_def = cannon_def
-        self.attack_value = attack_value
-        self.hex = hex_position
-        self.alive = True
+            if quit_button_rect.collidepoint(event.pos):
+                running = False
 
-    def take_hit(self):
-        self.hp -= 1
-        print(f">>> {self.name} takes 1 HIT (HP {self.hp})")
-        if self.hp <= 0:
-            self.alive = False
-            print(f">>> {self.name} DESTROYED")
+            if not show_base_screen:
+                board_x = (WINDOW_WIDTH - board.board_img.get_width()) // 2
+                board_y = (WINDOW_HEIGHT - board.board_img.get_height()) // 2
+                hex_positions = get_hex_positions(board_x, board_y, board.layout)
+                game_state.handle_click(event.pos, hex_positions, add_log)
 
-# ==========================================================
-# BATTALION
-# ==========================================================
+    screen.fill((15, 15, 15))
 
-class Battalion:
-    def __init__(self, units):
-        self.units = units
-
-    def alive_units(self):
-        return [u for u in self.units if u.alive]
-
-    def total_hp(self):
-        return sum(u.hp for u in self.units if u.alive)
-
-    def status(self):
-        hp = self.total_hp()
-        if hp == 0:
-            return "DESTROYED"
-        elif hp <= 2:
-            return "HALF"
-        else:
-            return "FULL"
-
-# ==========================================================
-# ASCII MAP RENDERER (100% SAFE)
-# ==========================================================
-
-def render_map():
-
-    hex_contents = {i: [] for i in range(1,8)}
-
-    for ac in aircraft_list:
-        alt = "H" if ac.altitude == "HIGH" else "L"
-        hex_contents[ac.hex].append(f"A{alt}")
-
-    for e in enemies:
-        if e.alive:
-            hex_contents[e.hex].append(e.icon)
-
-    def cell(n):
-        content = ",".join(hex_contents[n])
-        if not content:
-            content = ""
-        return f"{n}:{content}".ljust(10)
-
-    print("\n")
-    print("                 ________        ________")
-    print("                /        \\      /        \\")
-    print(f"               / {cell(1)} \\______/ {cell(2)} \\")
-    print("               \\________/      \\________/")
-    print("          ________        ________        ________")
-    print("         /        \\______/        \\______/        \\")
-    print(f"        / {cell(3)} \\      / {cell(4)} \\      / {cell(5)} \\")
-    print("        \\________/      \\________/      \\________/")
-    print("               ________        ________")
-    print("              /        \\______/        \\")
-    print(f"             / {cell(6)} \\      / {cell(7)} \\")
-    print("             \\________/      \\________/")
-    print()
-
-    print("Legend:")
-    print("AH = Aircraft High")
-    print("AL = Aircraft Low")
-    print("T  = Tank")
-    print("G  = AAA")
-    print("Ridges:", [tuple(r) for r in RIDGES])
-    print()
-
-# ==========================================================
-# SETUP
-# ==========================================================
-
-pilot = Pilot("Viper", strike=2, cannon=2, cool=1)
-
-aircraft_list = [
-    Aircraft("A-10", "FAST", 4)
-]
-
-enemies = [
-    EnemyUnit("Tank", "T", 2, 6, 5, 3, 3),
-    EnemyUnit("AAA", "G", 2, 7, 6, 4, 5)
-]
-
-battalion = Battalion(enemies)
-loiter = 6
-
-# ==========================================================
-# COMBAT
-# ==========================================================
-
-def cover_bonus(target):
-    bonus = 0
-    for other in enemies:
-        if other.alive and other != target:
-            if other.hex == target.hex:
-                bonus += 1
-            elif is_adjacent(other.hex, target.hex):
-                bonus += 1
-    return bonus
-
-
-def player_attack(ac, target, attack_type):
-
-    if not has_line_of_sight(ac.hex, target.hex):
-        print(">>> Ridge blocks line of sight!")
-        return
-
-    if attack_type == "strike":
-        base = pilot.strike
-        target_number = target.strike_def
+    if show_base_screen:
+        board.draw_base(screen)
     else:
-        if ac.altitude != "LOW":
-            print(">>> Must be LOW for Cannon.")
-            return
-        base = pilot.cannon
-        target_number = target.cannon_def
+        board_x, board_y = board.draw(screen)
+        hex_positions = get_hex_positions(board_x, board_y, board.layout)
 
-    target_number += cover_bonus(target)
+        # Draw tiles
+        index = 0
+        for row in board.map_tiles:
+            for tile in row:
+                x, y = hex_positions[index]
+                screen.blit(tile, (x, y))
+                index += 1
 
-    roll = roll_d10()
-    total = roll + base
+        game_state.draw_enemy(screen, hex_positions, terminal_font)
+        game_state.draw_aircraft(screen, hex_positions)
 
-    print(f"Roll {roll} + {base} = {total} (Need {target_number})")
+        # ----- TERMINAL PANEL (BOARD RELATIVE) -----
+        log_rect = pygame.Rect(
+            board_x + 1080,
+            board_y + 1,
+            1418 - 1080,
+            236 - 1
+        )
 
-    if total >= target_number:
-        target.take_hit()
-    else:
-        print("Missed.")
+        pygame.draw.rect(screen, (0, 0, 0), log_rect)
 
+        y_offset = log_rect.top + 5
+        for line in log_lines:
+            text_surface = terminal_font.render("> " + line, True, (0, 255, 0))
+            screen.blit(text_surface, (log_rect.left + 8, y_offset))
+            y_offset += 16
 
-def enemy_fire(ac):
+    pygame.draw.rect(screen, (180, 40, 40), quit_button_rect)
+    quit_font = pygame.font.SysFont("arial", 18)
+    text = quit_font.render("QUIT", True, (255, 255, 255))
+    text_rect = text.get_rect(center=quit_button_rect.center)
+    screen.blit(text, text_rect)
 
-    for e in enemies:
-        if not e.alive:
-            continue
+    pygame.display.flip()
 
-        if not has_line_of_sight(e.hex, ac.hex):
-            continue
-
-        if not is_adjacent(e.hex, ac.hex) and e.hex != ac.hex:
-            continue
-
-        print(f"{e.name} fires!")
-
-        roll = roll_d10()
-        print("Enemy roll:", roll)
-
-        if roll <= e.attack_value:
-            ac.take_structure_hit()
-        elif roll <= e.attack_value + 2:
-            pilot.add_stress(1)
-        else:
-            print("No effect.")
-
-        if ac.destroyed():
-            return
-
-# ==========================================================
-# MAIN LOOP
-# ==========================================================
-
-print("=== TAL ENGINE V8 ===")
-
-while loiter > 0:
-
-    print("\n====================================")
-    print(f"LOITER: {loiter}")
-    print("Battalion:", battalion.status())
-    render_map()
-
-    if battalion.total_hp() == 0:
-        break
-
-    print("--- FAST AIRCRAFT PHASE ---")
-
-    for ac in aircraft_list:
-
-        if ac.speed != "FAST":
-            continue
-
-        print(f"{ac.name} at hex {ac.hex} altitude {ac.altitude}")
-
-        action = input("M)ove A)ltitude F)ire 0)Skip > ").upper()
-
-        if action == "M":
-            print("Adjacent:", HEX_CONNECTIONS[ac.hex])
-            ac.move(int(input("Move to hex: ")))
-        elif action == "A":
-            ac.change_altitude()
-        elif action == "F":
-            targets = battalion.alive_units()
-            for i,e in enumerate(targets):
-                print(f"{i+1}) {e.name} (hex {e.hex})")
-            choice = int(input("Target: ")) - 1
-            target = targets[choice]
-            atk = input("1)Strike 2)Cannon > ")
-            player_attack(ac, target, "strike" if atk=="1" else "cannon")
-
-    print("--- ENEMY FIRE ---")
-
-    for ac in aircraft_list:
-        enemy_fire(ac)
-        if ac.destroyed():
-            break
-
-    if any(ac.destroyed() for ac in aircraft_list):
-        break
-
-    loiter -= 1
-
-print("\n=== MISSION END ===")
-print("Battalion:", battalion.status())
-print("Stress:", pilot.stress)
-for ac in aircraft_list:
-    print(ac.name, "Structure:", ac.structure)
+pygame.quit()
+sys.exit()
