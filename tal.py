@@ -85,10 +85,10 @@ while running:
 
         # ----- TERMINAL PANEL (BOARD RELATIVE) -----
         log_rect = pygame.Rect(
-            board_x + 1080,
-            board_y + 1,
-            1418 - 1080,
-            236 - 1
+            board_x + 1300,
+            board_y + 5,
+            350,
+            240
         )
 
         pygame.draw.rect(screen, (0, 0, 0), log_rect)
